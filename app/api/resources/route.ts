@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { categoryLabels, resources, zipCoordinates } from "../../../data/resources";
+import { createClient } from "@supabase/supabase-js";
+import { categoryLabels, resources as mockResources, zipCoordinates } from "../../../data/resources";
 
 type Coordinates = { lat: number; lng: number };
 
@@ -23,6 +24,28 @@ const haversineMiles = (a: Coordinates, b: Coordinates) => {
   return 2 * earthRadiusMiles * Math.asin(Math.min(1, Math.sqrt(haversine)));
 };
 
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+type DbResource = {
+  id: string;
+  name: string;
+  categories: string[];
+  description: string;
+  address: string;
+  city: string;
+  state: string;
+  zip: string;
+  phone?: string | null;
+  website?: string | null;
+  hours: string;
+  cost: string;
+  eligibility: string;
+  lat: number | null;
+  lng: number | null;
+  verified?: boolean | null;
+};
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const zip = searchParams.get("zip") || "94103";
@@ -31,11 +54,80 @@ export async function GET(req: NextRequest) {
   const userCoords = zipCoordinates[zip];
   const selectedCategories = categories?.split(",").filter(Boolean) ?? [];
 
-  const filtered = resources
+  // If Supabase is not configured, fall back to mock data.
+  if (!supabaseUrl || !supabaseServiceKey) {
+    const fallback = applyFilters(mockResources, userCoords, selectedCategories, zip);
+    return NextResponse.json(fallback);
+  }
+
+  const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+  let query = supabase.from("resources").select("*");
+
+  if (selectedCategories.length) {
+    query = query.overlaps("categories", selectedCategories);
+  }
+
+  const { data, error } = await query;
+
+  if (error || !data) {
+    console.error("Supabase error", error);
+    const fallback = applyFilters(mockResources, userCoords, selectedCategories, zip);
+    return NextResponse.json({ ...fallback, metadata: { ...fallback.metadata, source: "mock" } });
+  }
+
+  const normalized = data.map((row: DbResource) => ({
+    id: row.id,
+    name: row.name,
+    categories: row.categories,
+    description: row.description,
+    address: row.address,
+    city: row.city,
+    state: row.state,
+    zip: row.zip,
+    phone: row.phone ?? undefined,
+    website: row.website ?? undefined,
+    hours: row.hours,
+    cost: row.cost,
+    eligibility: row.eligibility,
+    coordinates:
+      row.lat !== null && row.lng !== null ? { lat: row.lat, lng: row.lng } : null,
+    verified: row.verified ?? undefined
+  }));
+
+  const filtered = applyFilters(normalized, userCoords, selectedCategories, zip);
+
+  return NextResponse.json({ ...filtered, metadata: { ...filtered.metadata, source: "supabase" } });
+}
+
+function applyFilters(
+  resourceList: Array<
+    {
+      coordinates: { lat: number; lng: number } | null;
+      categories: string[];
+      id: string;
+      name: string;
+      description: string;
+      address: string;
+      city: string;
+      state: string;
+      zip: string;
+      phone?: string;
+      website?: string;
+      hours: string;
+      cost: string;
+      eligibility: string;
+    }
+  >,
+  userCoords: { lat: number; lng: number; city: string } | undefined,
+  selectedCategories: string[],
+  zip: string
+) {
+  const filtered = resourceList
     .map((resource) => {
       const withinCategory =
         selectedCategories.length === 0 ||
-        selectedCategories.some((cat) => resource.categories.includes(cat as any));
+        selectedCategories.some((cat) => resource.categories.includes(cat));
 
       const distance =
         userCoords && resource.coordinates
@@ -57,7 +149,7 @@ export async function GET(req: NextRequest) {
       return a.distance - b.distance;
     });
 
-  return NextResponse.json({
+  return {
     zip,
     locationLabel: userCoords?.city ?? "Unknown area",
     availableCategories: categoryLabels,
@@ -67,5 +159,5 @@ export async function GET(req: NextRequest) {
       matchedCount: filtered.length,
       centered: Boolean(userCoords)
     }
-  });
+  };
 }

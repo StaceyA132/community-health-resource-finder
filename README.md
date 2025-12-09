@@ -8,7 +8,19 @@ Next.js prototype for a geolocation-friendly health resource finder, plus a Swif
 2. Run locally: `npm run dev`
 3. Open: http://localhost:3000
 
-The mock API lives at `/api/resources` and reads from `data/resources.ts`. Filter with `?zip=94103&categories=mental-health,pharmacy`.
+The API lives at `/api/resources`. By default it reads from `data/resources.ts`. Filter with `?zip=94103&categories=mental-health,pharmacy`.
+
+### Connect to Supabase (optional, replaces mock data)
+- Create a table `resources` with columns:  
+  `id uuid primary key`, `name text`, `categories text[]`, `description text`, `address text`, `city text`, `state text`, `zip text`, `phone text`, `website text`, `hours text`, `cost text`, `eligibility text`, `lat double precision`, `lng double precision`, `verified boolean`.
+- Add a Row Level Security policy that allows read (select) for your use case (e.g., anon select on verified rows).
+- Add `.env.local` (not committed) with:
+  ```
+  SUPABASE_URL=your-project-url
+  SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+  ```
+  Use the service role key only on the server; never expose it to the client.
+- The route will automatically fetch from Supabase; if env vars are missing or Supabase errors, it falls back to the mock data.
 
 ## Editing data
 
