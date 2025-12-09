@@ -21,6 +21,7 @@ The API lives at `/api/resources`. By default it reads from `data/resources.ts`.
   ```
   Use the service role key only on the server; never expose it to the client.
 - The route will automatically fetch from Supabase; if env vars are missing or Supabase errors, it falls back to the mock data.
+- Geolocation: the web UI can request your browser location to auto-center results; if denied or unavailable, it uses the entered zip or mock data.
 
 ## Editing data
 

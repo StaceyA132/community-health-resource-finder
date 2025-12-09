@@ -28,6 +28,8 @@ const categoryOrder: ResourceCategory[] = [
 export default function Home() {
   const [zip, setZip] = useState("94103");
   const [selectedCategories, setSelectedCategories] = useState<ResourceCategory[]>([]);
+  const [geoCoords, setGeoCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [geoStatus, setGeoStatus] = useState<string | null>(null);
   const [results, setResults] = useState<ApiResult["results"]>([]);
   const [locationLabel, setLocationLabel] = useState("");
   const [metadata, setMetadata] = useState<ApiResult["metadata"] | null>(null);
@@ -49,6 +51,10 @@ export default function Home() {
       const params = new URLSearchParams({ zip });
       if (selectedCategories.length) {
         params.set("categories", selectedCategories.join(","));
+      }
+      if (geoCoords) {
+        params.set("lat", String(geoCoords.lat));
+        params.set("lng", String(geoCoords.lng));
       }
 
       const response = await fetch(`/api/resources?${params.toString()}`);
@@ -77,6 +83,27 @@ export default function Home() {
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
     fetchResources();
+  };
+
+  const useMyLocation = () => {
+    if (!("geolocation" in navigator)) {
+      setGeoStatus("Geolocation not supported by this browser.");
+      return;
+    }
+    setGeoStatus("Locating...");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude } = pos.coords;
+        setGeoCoords({ lat: latitude, lng: longitude });
+        setGeoStatus("Location detected.");
+        fetchResources();
+      },
+      (err) => {
+        console.error(err);
+        setGeoStatus("Could not get location. Check permissions.");
+      },
+      { timeout: 8000 }
+    );
   };
 
   return (
@@ -110,6 +137,12 @@ export default function Home() {
             {loading ? "Searching..." : "Find resources"}
           </button>
         </form>
+        <div className="geo-row">
+          <button type="button" className="ghost-button" onClick={useMyLocation} disabled={loading}>
+            Use my location
+          </button>
+          <span className="geo-status">{geoStatus ?? "We’ll search near your zip or location."}</span>
+        </div>
 
         <div>
           <div className="pill-row">

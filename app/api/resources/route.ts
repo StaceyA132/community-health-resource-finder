@@ -50,8 +50,17 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const zip = searchParams.get("zip") || "94103";
   const categories = searchParams.get("categories");
+  const latParam = searchParams.get("lat");
+  const lngParam = searchParams.get("lng");
 
-  const userCoords = zipCoordinates[zip];
+  const lat = latParam ? Number.parseFloat(latParam) : NaN;
+  const lng = lngParam ? Number.parseFloat(lngParam) : NaN;
+
+  const userCoords =
+    Number.isFinite(lat) && Number.isFinite(lng)
+      ? { lat, lng, city: "Your location" }
+      : zipCoordinates[zip];
+
   const selectedCategories = categories?.split(",").filter(Boolean) ?? [];
 
   // If Supabase is not configured, fall back to mock data.
@@ -101,24 +110,22 @@ export async function GET(req: NextRequest) {
 }
 
 function applyFilters(
-  resourceList: Array<
-    {
-      coordinates: { lat: number; lng: number } | null;
-      categories: string[];
-      id: string;
-      name: string;
-      description: string;
-      address: string;
-      city: string;
-      state: string;
-      zip: string;
-      phone?: string;
-      website?: string;
-      hours: string;
-      cost: string;
-      eligibility: string;
-    }
-  >,
+  resourceList: Array<{
+    coordinates: { lat: number; lng: number } | null;
+    categories: string[];
+    id: string;
+    name: string;
+    description: string;
+    address: string;
+    city: string;
+    state: string;
+    zip: string;
+    phone?: string;
+    website?: string;
+    hours: string;
+    cost: string;
+    eligibility: string;
+  }>,
   userCoords: { lat: number; lng: number; city: string } | undefined,
   selectedCategories: string[],
   zip: string

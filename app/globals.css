@@ -134,6 +134,26 @@ input[type="text"]:focus {
   box-shadow: 0 10px 25px rgba(56, 189, 248, 0.25);
 }
 
+.ghost-button {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 0.65rem 0.9rem;
+}
+
+.geo-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.geo-status {
+  color: var(--muted);
+}
+
 .resource-grid {
   margin-top: 1.5rem;
   display: grid;
