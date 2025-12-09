@@ -36,7 +36,7 @@ The API lives at `/api/resources`. By default it reads from `data/resources.ts`.
 
 ## Next steps
 
-- Swap the mock data file for a database-backed API.
+- Swap the mock data file for a database-backed API. COMPLETED
 - Add geolocation permissions to auto-detect the user’s location.
 - Connect to real verification/curation workflows for submissions.
 # community-health-resource-finder
