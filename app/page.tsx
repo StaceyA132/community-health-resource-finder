@@ -72,7 +72,12 @@ export default function Home() {
   };
 
   useEffect(() => {
+    // Load resources immediately for the default zip, then try to auto-detect location
+    // to improve relevance.
     fetchResources();
+    if (typeof navigator !== "undefined" && "geolocation" in navigator) {
+      useMyLocation();
+    }
   }, []);
 
   const selectedLabel = useMemo(() => {
