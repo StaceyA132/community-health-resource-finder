@@ -1,6 +1,5 @@
 # Community Health Resource Finder
-
-Next.js prototype for a geolocation-friendly health resource finder, plus a SwiftUI starter for iOS. Users can search by zip code, filter by category, and view verified listings with cost, eligibility, and contact info.
+A small Next.js app that finds nearby health resources. Enter a ZIP code or allow geolocation to see clinics, food banks, pharmacies, shelters, and other low-cost services.
 
 ## Quickstart (web)
 
@@ -26,18 +25,15 @@ The API lives at `/api/resources`. By default it reads from `data/resources.ts`.
 ## Editing data
 
 - Update or extend the seed data in `data/resources.ts`.
-- Each entry supports categories: mental-health, emergency-care, womens-health, pharmacy, dental, food, shelter.
+- Each entry supports categories: `mental-health`, `emergency-care`, `womens-health`, `pharmacy`, `dental`, `food`, `shelter`.
 - Zip-to-coordinate hints are in `zipCoordinates` for rough distance sorting and a 60-mile radius filter.
 
 ## iOS starter
 
-- A SwiftUI scaffold is in `ios/CommunityHealthFinder`.
-- Open the folder in Xcode, create a new SwiftUI App target, and replace the generated `App` and `ContentView` files with the ones provided here.
-- The `ResourceService` reads the same shape as the web JSON response to keep feature parity.
+- A SwiftUI starter app lives in `ios/CommunityHealthFinder`.
+- Open the folder in Xcode and use the provided `ResourceService` and views as a starting point.
 
-## Next steps
+## Notes
 
-- Swap the mock data file for a database-backed API. COMPLETED
-- Add geolocation permissions to auto-detect the user’s location.
-- Connect to real verification/curation workflows for submissions.
-# community-health-resource-finder
+- The API is at `/api/resources`. It defaults to `data/resources.ts` unless Supabase is configured.
+- Geolocation is optional; users can still search by ZIP code.
