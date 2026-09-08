@@ -28,6 +28,20 @@ The API lives at `/api/resources`. By default it reads from `data/resources.ts`.
 - Each entry supports categories: `mental-health`, `emergency-care`, `womens-health`, `pharmacy`, `dental`, `food`, `shelter`.
 - Zip-to-coordinate hints are in `zipCoordinates` for rough distance sorting and a 60-mile radius filter.
 
+## Resource helper chat
+
+The floating **Chat with a resource helper** button turns everyday requests into the existing category filters. It works with local matching by default, so no service or key is required for the demo.
+
+To enable AI-generated replies, add the following to `.env.local` (never commit this file):
+
+```
+OPENAI_API_KEY=your-api-key
+# Optional; defaults to gpt-5
+OPENAI_MODEL=gpt-5
+```
+
+The API key stays in `app/api/chat/route.ts` on the server. The helper is deliberately limited to navigating verified resources and displays emergency guidance rather than providing medical advice.
+
 ## iOS starter
 
 - A SwiftUI starter app lives in `ios/CommunityHealthFinder`.
