@@ -9,6 +9,15 @@ A small Next.js app that finds nearby health resources. Enter a ZIP code or allo
 
 The API lives at `/api/resources`. By default it reads from `data/resources.ts`. Filter with `?zip=94103&categories=mental-health,pharmacy`.
 
+### Nationwide data (no setup needed)
+
+Searches anywhere in the US also include nearby places from [OpenStreetMap](https://www.openstreetmap.org), fetched live through the free public [Overpass API](https://overpass-api.de) within about 15 miles. Zip codes are turned into map coordinates with [Zippopotam.us](https://zippopotam.us). Neither service needs an API key, and responses are cached for an hour.
+
+- OpenStreetMap listings are community-edited, so they show a "From OpenStreetMap" tag and ask people to call ahead. Your curated listings (sample data or Supabase) are always included alongside them.
+- If either service is down, the app still shows your curated listings.
+- To use a different Overpass server (for example, one you host for heavier traffic), set `OVERPASS_URL` in `.env.local`.
+- The public Overpass server is shared and rate-limited. It suits a demo or a small app, but a busy production site should host its own server or use a paid provider.
+
 ### Connect to Supabase (optional, replaces mock data)
 - Create a table `resources` with columns:  
   `id uuid primary key`, `name text`, `categories text[]`, `description text`, `address text`, `city text`, `state text`, `zip text`, `phone text`, `website text`, `hours text`, `cost text`, `eligibility text`, `lat double precision`, `lng double precision`, `verified boolean`.

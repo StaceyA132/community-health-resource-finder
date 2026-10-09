@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { categoryLabels, resources as mockResources, zipCoordinates } from "../../../data/resources";
+import {
+  ResourceCategory,
+  categoryLabels,
+  resources as mockResources,
+  zipCoordinates
+} from "../../../data/resources";
+import { LiveResource, fetchLiveResources, lookupZip } from "../../../lib/liveResources";
 
 type Coordinates = { lat: number; lng: number };
 
@@ -59,15 +65,38 @@ export async function GET(req: NextRequest) {
   const userCoords =
     Number.isFinite(lat) && Number.isFinite(lng)
       ? { lat, lng, city: "Your location" }
-      : zipCoordinates[zip];
+      : zipCoordinates[zip] ?? (await lookupZip(zip).catch(() => undefined));
 
-  const selectedCategories = categories?.split(",").filter(Boolean) ?? [];
+  const selectedCategories = (categories?.split(",").filter(Boolean) ?? []).filter(
+    (category): category is ResourceCategory => category in categoryLabels
+  );
+
+  // Curated listings (Supabase, or the sample data) and nearby OpenStreetMap places load in
+  // parallel. Either one failing still leaves the other's results.
+  const [curated, live] = await Promise.all([
+    loadCurated(selectedCategories),
+    userCoords
+      ? fetchLiveResources(userCoords, selectedCategories).catch((error) => {
+          console.error("OpenStreetMap lookup failed", error);
+          return null;
+        })
+      : Promise.resolve(null)
+  ]);
+
+  const combined = [...curated.resources, ...dedupeLive(live ?? [], curated.resources)];
+  const filtered = applyFilters(combined, userCoords, selectedCategories, zip);
+
+  return NextResponse.json({
+    ...filtered,
+    metadata: { ...filtered.metadata, source: curated.source, liveData: live !== null }
+  });
+}
+
+async function loadCurated(selectedCategories: ResourceCategory[]) {
+  const mock = { resources: mockResources.map((r) => ({ ...r, source: "curated" as const })), source: "mock" };
 
   // If Supabase is not configured, fall back to mock data.
-  if (!supabaseUrl || !supabaseServiceKey) {
-    const fallback = applyFilters(mockResources, userCoords, selectedCategories, zip);
-    return NextResponse.json(fallback);
-  }
+  if (!supabaseUrl || !supabaseServiceKey) return mock;
 
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -81,8 +110,7 @@ export async function GET(req: NextRequest) {
 
   if (error || !data) {
     console.error("Supabase error", error);
-    const fallback = applyFilters(mockResources, userCoords, selectedCategories, zip);
-    return NextResponse.json({ ...fallback, metadata: { ...fallback.metadata, source: "mock" } });
+    return mock;
   }
 
   const normalized = data.map((row: DbResource) => ({
@@ -101,12 +129,28 @@ export async function GET(req: NextRequest) {
     eligibility: row.eligibility,
     coordinates:
       row.lat !== null && row.lng !== null ? { lat: row.lat, lng: row.lng } : null,
-    verified: row.verified ?? undefined
+    verified: row.verified ?? undefined,
+    source: "curated" as const
   }));
 
-  const filtered = applyFilters(normalized, userCoords, selectedCategories, zip);
+  return { resources: normalized, source: "supabase" };
+}
 
-  return NextResponse.json({ ...filtered, metadata: { ...filtered.metadata, source: "supabase" } });
+// Skip OpenStreetMap places that are already in the curated list (same name, within ~200 m).
+function dedupeLive(
+  live: LiveResource[],
+  curated: Array<{ name: string; coordinates: { lat: number; lng: number } | null }>
+) {
+  const normalize = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return live.filter(
+    (place) =>
+      !curated.some(
+        (entry) =>
+          entry.coordinates &&
+          normalize(entry.name) === normalize(place.name) &&
+          haversineMiles(entry.coordinates, place.coordinates) < 0.125
+      )
+  );
 }
 
 function applyFilters(
@@ -125,6 +169,7 @@ function applyFilters(
     hours: string;
     cost: string;
     eligibility: string;
+    source: "curated" | "openstreetmap";
   }>,
   userCoords: { lat: number; lng: number; city: string } | undefined,
   selectedCategories: string[],
