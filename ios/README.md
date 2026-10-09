@@ -4,6 +4,8 @@ A SwiftUI app with the same features as the website: ZIP search, live location, 
 
 Requires Xcode 16 or later. The app runs on iOS 17 and later.
 
+<img src="../docs/images/ios-search.png" alt="The iPhone app showing nearby resources" width="300">
+
 ## Run it in the simulator
 
 1. Start the web app from the project root: `npm run dev`

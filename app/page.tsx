@@ -353,7 +353,9 @@ export default function Home() {
           <div className="meta-row" style={{ marginBottom: "0.75rem" }}>
             <strong>{results.length} resources</strong>
             <span>
-              {locationLabel} {metadata?.centered ? "" : "(approximate)"} • Zip {zip}
+              {geoCoords
+                ? "Near your current location"
+                : `${locationLabel}${metadata?.centered ? "" : " (approximate)"} • ZIP ${zip}`}
             </span>
           </div>
 

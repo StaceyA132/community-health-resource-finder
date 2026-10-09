@@ -7,6 +7,12 @@ Find free and low-cost health resources nearby: clinics, counseling, pharmacies,
 - **Category filters** for mental health, emergency care, women's health, pharmacy, dental, food banks, and shelter
 - **Resource helper chat** that turns plain requests ("I need a safe place to sleep") into filters, and shows 911 and 988 for emergencies
 
+![The website showing health resources near the user's live location in Seattle](docs/images/web-search.png)
+
+| Resource helper chat | iPhone app |
+| --- | --- |
+| <img src="docs/images/web-chat.png" alt="The resource helper answering an emergency message with 911 and 988 information" width="560"> | <img src="docs/images/ios-search.png" alt="The iPhone app showing nearby resources" width="230"> |
+
 ## Quickstart (web)
 
 Requires Node.js 20.9 or later.
