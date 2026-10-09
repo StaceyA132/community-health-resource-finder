@@ -3,6 +3,8 @@ A small Next.js app that finds nearby health resources. Enter a ZIP code or allo
 
 ## Quickstart (web)
 
+Requires Node.js 20.9 or later.
+
 1. Install dependencies: `npm install`
 2. Run locally: `npm run dev`
 3. Open: http://localhost:3000

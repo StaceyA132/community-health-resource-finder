@@ -18,6 +18,22 @@ const zipPattern = /^\d{5}$/;
 // Only refetch once the user has moved this far, so GPS jitter doesn't spam the API.
 const refetchDistanceMiles = 0.1;
 
+async function requestResources(
+  zip: string,
+  categories: ResourceCategory[],
+  coords: Coordinates | null
+): Promise<SearchResponse> {
+  const params = new URLSearchParams({ zip });
+  if (categories.length) params.set("categories", categories.join(","));
+  if (coords) {
+    params.set("lat", String(coords.lat));
+    params.set("lng", String(coords.lng));
+  }
+  const response = await fetch(`/api/resources?${params.toString()}`);
+  if (!response.ok) throw new Error(`Resource request failed: ${response.status}`);
+  return (await response.json()) as SearchResponse;
+}
+
 export default function Home() {
   // `zip` is the ZIP results are shown for; `zipInput` is what's typed in the box, so a
   // half-typed ZIP never reaches category toggles or live location updates.
@@ -30,7 +46,8 @@ export default function Home() {
   const [results, setResults] = useState<ResourceResult[] | null>(null);
   const [locationLabel, setLocationLabel] = useState("");
   const [metadata, setMetadata] = useState<SearchResponse["metadata"] | null>(null);
-  const [loading, setLoading] = useState(false);
+  // True from the start: results for the default ZIP load as soon as the page mounts.
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState("");
@@ -49,44 +66,46 @@ export default function Home() {
   const watchIdRef = useRef<number | null>(null);
   const requestIdRef = useRef(0);
   const chatMessagesRef = useRef<HTMLDivElement>(null);
-  zipRef.current = zip;
-  categoriesRef.current = selectedCategories;
-  coordsRef.current = geoCoords;
+
+  useEffect(() => {
+    zipRef.current = zip;
+    categoriesRef.current = selectedCategories;
+    coordsRef.current = geoCoords;
+  }, [zip, selectedCategories, geoCoords]);
 
   // Takes every input explicitly so callbacks (geolocation, chat) never read stale state.
-  const loadResources = useCallback(
-    async (nextZip: string, nextCategories: ResourceCategory[], coords: Coordinates | null) => {
+  // State is only set once the response arrives; loadResources also shows loading right away.
+  const fetchResults = useCallback(
+    (nextZip: string, nextCategories: ResourceCategory[], coords: Coordinates | null) => {
       const requestId = ++requestIdRef.current;
-      setLoading(true);
-      setError(null);
-      try {
-        const params = new URLSearchParams({ zip: nextZip });
-        if (nextCategories.length) {
-          params.set("categories", nextCategories.join(","));
-        }
-        if (coords) {
-          params.set("lat", String(coords.lat));
-          params.set("lng", String(coords.lng));
-        }
-
-        const response = await fetch(`/api/resources?${params.toString()}`);
-        if (!response.ok) throw new Error(`Resource request failed: ${response.status}`);
-        const json = (await response.json()) as SearchResponse;
-        // Live updates can overlap; only the newest request may update the list.
-        if (requestId !== requestIdRef.current) return;
-
-        setResults(json.results);
-        setLocationLabel(json.locationLabel);
-        setMetadata(json.metadata);
-      } catch (err) {
-        if (requestId !== requestIdRef.current) return;
-        console.error(err);
-        setError("Could not load resources. Please try again.");
-      } finally {
-        if (requestId === requestIdRef.current) setLoading(false);
-      }
+      // Live updates can overlap; only the newest request may update the list.
+      const isLatest = () => requestId === requestIdRef.current;
+      return requestResources(nextZip, nextCategories, coords)
+        .then((json) => {
+          if (!isLatest()) return;
+          setResults(json.results);
+          setLocationLabel(json.locationLabel);
+          setMetadata(json.metadata);
+        })
+        .catch((err) => {
+          if (!isLatest()) return;
+          console.error(err);
+          setError("Could not load resources. Please try again.");
+        })
+        .finally(() => {
+          if (isLatest()) setLoading(false);
+        });
     },
     []
+  );
+
+  const loadResources = useCallback(
+    (nextZip: string, nextCategories: ResourceCategory[], coords: Coordinates | null) => {
+      setLoading(true);
+      setError(null);
+      return fetchResults(nextZip, nextCategories, coords);
+    },
+    [fetchResults]
   );
 
   const stopTracking = useCallback(() => {
@@ -119,13 +138,14 @@ export default function Home() {
         loadResources(zipRef.current, categoriesRef.current, coords);
       },
       (err) => {
-        console.error(err);
+        // Declining location is a normal choice, not an error, so only log other failures.
         if (err.code === err.PERMISSION_DENIED) {
           if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
           watchIdRef.current = null;
           setTracking(false);
           setGeoStatus("Location permission denied. Search by zip instead.");
         } else {
+          console.warn("Location unavailable", err.message);
           setGeoStatus("Can’t get your location right now. Still trying…");
         }
       },
@@ -135,10 +155,13 @@ export default function Home() {
 
   useEffect(() => {
     // Show the default zip right away, then follow the user's live location if they allow it.
-    loadResources(DEFAULT_ZIP, [], null);
+    fetchResults(DEFAULT_ZIP, [], null);
+    // Subscribing to location updates is what this effect is for; startTracking also sets
+    // the "Locating..." status right away, which costs one extra render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     startTracking();
     return stopTracking;
-  }, [loadResources, startTracking, stopTracking]);
+  }, [fetchResults, startTracking, stopTracking]);
 
   useEffect(() => {
     // Scroll so the top of the newest message shows; long replies like the crisis
