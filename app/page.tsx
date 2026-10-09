@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Resource,
   ResourceCategory,
@@ -15,6 +15,8 @@ type ApiResult = {
   availableCategories: typeof categoryLabels;
 };
 
+type Coordinates = { lat: number; lng: number };
+
 type ChatMessage = { role: "assistant" | "user"; text: string };
 type ChatReply = {
   message: string;
@@ -22,6 +24,8 @@ type ChatReply = {
   zip?: string;
   emergency: boolean;
 };
+
+const defaultZip = "94103";
 
 const categoryOrder: ResourceCategory[] = [
   "mental-health",
@@ -34,9 +38,9 @@ const categoryOrder: ResourceCategory[] = [
 ];
 
 export default function Home() {
-  const [zip, setZip] = useState("94103");
+  const [zip, setZip] = useState(defaultZip);
   const [selectedCategories, setSelectedCategories] = useState<ResourceCategory[]>([]);
-  const [geoCoords, setGeoCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [geoCoords, setGeoCoords] = useState<Coordinates | null>(null);
   const [geoStatus, setGeoStatus] = useState<string | null>(null);
   const [results, setResults] = useState<ApiResult["results"]>([]);
   const [locationLabel, setLocationLabel] = useState("");
@@ -58,41 +62,70 @@ export default function Home() {
     );
   };
 
-  const fetchResources = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams({ zip });
-      if (selectedCategories.length) {
-        params.set("categories", selectedCategories.join(","));
-      }
-      if (geoCoords) {
-        params.set("lat", String(geoCoords.lat));
-        params.set("lng", String(geoCoords.lng));
-      }
+  // Takes every input explicitly so callbacks (geolocation, chat) never read stale state.
+  const loadResources = useCallback(
+    async (nextZip: string, nextCategories: ResourceCategory[], coords: Coordinates | null) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const params = new URLSearchParams({ zip: nextZip });
+        if (nextCategories.length) {
+          params.set("categories", nextCategories.join(","));
+        }
+        if (coords) {
+          params.set("lat", String(coords.lat));
+          params.set("lng", String(coords.lng));
+        }
 
-      const response = await fetch(`/api/resources?${params.toString()}`);
-      const json = (await response.json()) as ApiResult;
+        const response = await fetch(`/api/resources?${params.toString()}`);
+        if (!response.ok) throw new Error(`Resource request failed: ${response.status}`);
+        const json = (await response.json()) as ApiResult;
 
-      setResults(json.results);
-      setLocationLabel(json.locationLabel);
-      setMetadata(json.metadata);
-    } catch (err) {
-      console.error(err);
-      setError("Could not load resources. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  };
+        setResults(json.results);
+        setLocationLabel(json.locationLabel);
+        setMetadata(json.metadata);
+      } catch (err) {
+        console.error(err);
+        setError("Could not load resources. Please try again.");
+      } finally {
+        setLoading(false);
+      }
+    },
+    []
+  );
+
+  const locate = useCallback(
+    (nextZip: string, nextCategories: ResourceCategory[]) => {
+      if (typeof navigator === "undefined" || !("geolocation" in navigator)) {
+        setGeoStatus("Geolocation not supported by this browser.");
+        return;
+      }
+      setGeoStatus("Locating...");
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          setGeoCoords(coords);
+          setGeoStatus("Location detected.");
+          loadResources(nextZip, nextCategories, coords);
+        },
+        (err) => {
+          console.error(err);
+          setGeoStatus("Could not get location. Check permissions.");
+        },
+        { timeout: 8000 }
+      );
+    },
+    [loadResources]
+  );
 
   useEffect(() => {
     // Load resources immediately for the default zip, then try to auto-detect location
     // to improve relevance.
-    fetchResources();
+    loadResources(defaultZip, [], null);
     if (typeof navigator !== "undefined" && "geolocation" in navigator) {
-      findMyLocation();
+      locate(defaultZip, []);
     }
-  }, []);
+  }, [loadResources, locate]);
 
   const selectedLabel = useMemo(() => {
     if (!selectedCategories.length) return "All categories";
@@ -101,7 +134,10 @@ export default function Home() {
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
-    fetchResources();
+    // A typed zip is an explicit choice, so stop centering on the detected location.
+    setGeoCoords(null);
+    setGeoStatus(null);
+    loadResources(zip, selectedCategories, null);
   };
 
   const sendChatMessage = async (preset?: string) => {
@@ -120,63 +156,23 @@ export default function Home() {
       if (!response.ok) throw new Error("Chat request failed");
       const reply = (await response.json()) as ChatReply;
       setChatMessages((current) => [...current, { role: "assistant", text: reply.message }]);
-      if (reply.zip) setZip(reply.zip);
-      if (reply.categories.length) {
-        setSelectedCategories(reply.categories);
+      const nextZip = reply.zip ?? zip;
+      const nextCategories = reply.categories.length ? reply.categories : selectedCategories;
+      // Asking about a different zip means searching there, not around the detected location.
+      const coords = nextZip === zip ? geoCoords : null;
+      if (nextZip !== zip) {
+        setZip(nextZip);
+        setGeoCoords(null);
+        setGeoStatus(null);
       }
-      if (reply.categories.length || reply.zip) {
-        await fetchResourcesFor(reply.zip ?? zip, reply.categories.length ? reply.categories : selectedCategories);
-      }
+      setSelectedCategories(nextCategories);
+      await loadResources(nextZip, nextCategories, coords);
     } catch (err) {
       console.error(err);
       setChatMessages((current) => [...current, { role: "assistant", text: "I’m having trouble connecting right now. Try using the resource filters above." }]);
     } finally {
       setChatLoading(false);
     }
-  };
-
-  const fetchResourcesFor = async (nextZip: string, nextCategories: ResourceCategory[]) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams({ zip: nextZip });
-      if (nextCategories.length) params.set("categories", nextCategories.join(","));
-      if (geoCoords) {
-        params.set("lat", String(geoCoords.lat));
-        params.set("lng", String(geoCoords.lng));
-      }
-      const response = await fetch(`/api/resources?${params.toString()}`);
-      const json = (await response.json()) as ApiResult;
-      setResults(json.results);
-      setLocationLabel(json.locationLabel);
-      setMetadata(json.metadata);
-    } catch (err) {
-      console.error(err);
-      setError("Could not load resources. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const findMyLocation = () => {
-    if (!("geolocation" in navigator)) {
-      setGeoStatus("Geolocation not supported by this browser.");
-      return;
-    }
-    setGeoStatus("Locating...");
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const { latitude, longitude } = pos.coords;
-        setGeoCoords({ lat: latitude, lng: longitude });
-        setGeoStatus("Location detected.");
-        fetchResources();
-      },
-      (err) => {
-        console.error(err);
-        setGeoStatus("Could not get location. Check permissions.");
-      },
-      { timeout: 8000 }
-    );
   };
 
   return (
@@ -211,7 +207,7 @@ export default function Home() {
           </button>
         </form>
         <div className="geo-row">
-          <button type="button" className="ghost-button" onClick={findMyLocation} disabled={loading}>
+          <button type="button" className="ghost-button" onClick={() => locate(zip, selectedCategories)} disabled={loading}>
             Use my location
           </button>
           <span className="geo-status">{geoStatus ?? "We’ll search near your zip or location."}</span>

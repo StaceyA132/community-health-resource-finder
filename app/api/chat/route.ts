@@ -10,7 +10,35 @@ type ChatReply = {
   emergency: boolean;
 };
 
-const emergencyPattern = /\b(attack|assault|overdose|suicid(?:e|al)|kill myself|hurt myself|can't breathe|chest pain|unconscious)\b/i;
+const emergencyPattern = /\b(attack|assault|overdose|suicid(?:e|al)|kill myself|hurt myself|can['’]?t breathe|chest pain|unconscious)\b/i;
+
+// Everyday words people use for each category. Matching on label words alone caught generic
+// words like "care" and "health", so "dental care" also selected Emergency Care.
+const categoryKeywords: Record<ResourceCategory, string[]> = {
+  "mental-health": ["mental", "therapy", "therapist", "counsel", "anxiety", "depress", "stress"],
+  "emergency-care": ["emergency", "urgent", "hospital", " er "],
+  "womens-health": ["women", "woman", "prenatal", "pregnan", "gynec", "birth control", "contracepti"],
+  pharmacy: ["pharmac", "prescription", "medication", "medicine", "refill"],
+  dental: ["dental", "dentist", "tooth", "teeth"],
+  food: ["food", "hungry", "meal", "groceries", " eat "],
+  shelter: ["shelter", "housing", "homeless", "sleep", "place to stay", " bed"]
+};
+
+// Pull the text out of a raw Responses API payload. `output_text` only exists on the SDK
+// helper object, not in the HTTP response.
+function extractOutputText(data: unknown): string | undefined {
+  const output = (data as { output?: unknown }).output;
+  if (!Array.isArray(output)) return undefined;
+  for (const item of output) {
+    const content = (item as { type?: string; content?: unknown }).content;
+    if ((item as { type?: string }).type !== "message" || !Array.isArray(content)) continue;
+    for (const part of content) {
+      const { type, text } = part as { type?: string; text?: unknown };
+      if (type === "output_text" && typeof text === "string") return text;
+    }
+  }
+  return undefined;
+}
 
 function validateReply(value: unknown, currentZip: string): ChatReply {
   const reply = value as Partial<ChatReply>;
@@ -33,11 +61,10 @@ function validateReply(value: unknown, currentZip: string): ChatReply {
 }
 
 function localReply(message: string, zip: string): ChatReply {
-  const lower = message.toLowerCase();
-  const detected = categories.filter((category) => {
-    const label = categoryLabels[category].toLowerCase();
-    return lower.includes(category) || label.split(" ").some((word) => word.length > 3 && lower.includes(word));
-  });
+  const lower = ` ${message.toLowerCase().replace(/’/g, "'")} `;
+  const detected = categories.filter((category) =>
+    lower.includes(category) || categoryKeywords[category].some((keyword) => lower.includes(keyword))
+  );
   const detectedZip = message.match(/\b\d{5}\b/)?.[0] ?? zip;
 
   if (emergencyPattern.test(message)) {
@@ -60,7 +87,12 @@ function localReply(message: string, zip: string): ChatReply {
 }
 
 export async function POST(request: NextRequest) {
-  const body = (await request.json()) as { message?: unknown; zip?: unknown };
+  let body: { message?: unknown; zip?: unknown };
+  try {
+    body = (await request.json()) as { message?: unknown; zip?: unknown };
+  } catch {
+    return NextResponse.json({ error: "Request body must be JSON." }, { status: 400 });
+  }
   const message = typeof body.message === "string" ? body.message.trim().slice(0, 750) : "";
   const zip = typeof body.zip === "string" && /^\d{5}$/.test(body.zip) ? body.zip : "94103";
 
@@ -107,8 +139,9 @@ export async function POST(request: NextRequest) {
     });
 
     if (!response.ok) throw new Error(`OpenAI request failed: ${response.status}`);
-    const data = (await response.json()) as { output_text?: string };
-    return NextResponse.json(validateReply(JSON.parse(data.output_text ?? "{}"), zip));
+    const outputText = extractOutputText(await response.json());
+    if (!outputText) throw new Error("OpenAI response had no output text");
+    return NextResponse.json(validateReply(JSON.parse(outputText), zip));
   } catch (error) {
     console.error("Chat request failed", error);
     return NextResponse.json(localReply(message, zip));

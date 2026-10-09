@@ -151,8 +151,10 @@ function applyFilters(
     })
     .filter((entry) => entry.matches)
     .sort((a, b) => {
-      if (a.distance === null) return 0;
-      if (b.distance === null) return 0;
+      // Resources without coordinates go last instead of breaking the sort order.
+      if (a.distance === null && b.distance === null) return 0;
+      if (a.distance === null) return 1;
+      if (b.distance === null) return -1;
       return a.distance - b.distance;
     });
 
