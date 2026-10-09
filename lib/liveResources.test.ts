@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchLiveResources } from "./liveResources";
+import type { ResourceCategory } from "../data/resources";
+import { LiveResource, fetchLiveResources, keepNearestPerCategory } from "./liveResources";
 
 const pharmacy = {
   elements: [{ type: "node", id: 1, lat: 47.61, lon: -122.33, tags: { name: "Corner Pharmacy", amenity: "pharmacy" } }]
@@ -58,5 +59,52 @@ describe("fetchLiveResources", () => {
 
     expect(a).toEqual(b);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("keepNearestPerCategory", () => {
+  const center = { lat: 47.6, lng: -122.3 };
+  // Places spread north of the center; a higher index means farther away.
+  const place = (id: string, index: number, categories: ResourceCategory[]): LiveResource => ({
+    id,
+    name: id,
+    categories,
+    description: "",
+    address: "",
+    city: "",
+    state: "",
+    zip: "",
+    hours: "",
+    cost: "",
+    eligibility: "",
+    coordinates: { lat: center.lat + index * 0.001, lng: center.lng },
+    source: "openstreetmap"
+  });
+
+  it("keeps rare categories when a common one has hundreds of places", () => {
+    const dentists = Array.from({ length: 500 }, (_, i) => place(`dentist-${i}`, i, ["dental"]));
+    const shelters = [place("shelter-far", 900, ["shelter"]), place("shelter-near", 600, ["shelter"])];
+    const kept = keepNearestPerCategory([...dentists, ...shelters], center, ["dental", "shelter"]);
+
+    expect(kept.filter((p) => p.categories.includes("dental"))).toHaveLength(150);
+    expect(kept.filter((p) => p.categories.includes("shelter")).map((p) => p.id)).toEqual(["shelter-near", "shelter-far"]);
+  });
+
+  it("keeps the nearest places, not the first ones returned", () => {
+    const dentists = Array.from({ length: 400 }, (_, i) => place(`dentist-${i}`, 400 - i, ["dental"]));
+    const kept = keepNearestPerCategory(dentists, center, ["dental"]);
+
+    expect(kept).toHaveLength(300);
+    expect(kept[0].id).toBe("dentist-399");
+    expect(kept.some((p) => p.id === "dentist-0")).toBe(false);
+  });
+
+  it("counts a place in several categories toward each of them", () => {
+    const both = place("clinic", 0, ["dental", "pharmacy"]);
+    const pharmacies = Array.from({ length: 200 }, (_, i) => place(`pharmacy-${i}`, i + 1, ["pharmacy"]));
+    const kept = keepNearestPerCategory([both, ...pharmacies], center, ["dental", "pharmacy"]);
+
+    expect(kept[0].id).toBe("clinic");
+    expect(kept.filter((p) => p.categories.includes("pharmacy"))).toHaveLength(150);
   });
 });

@@ -1,4 +1,5 @@
 import type { ResourceCategory } from "../data/resources";
+import { haversineMiles } from "./geo";
 
 // Nationwide data from OpenStreetMap (via the public Overpass API) and US zip lookups from
 // Zippopotam.us. Neither needs an API key. Responses are cached for an hour so repeat
@@ -18,7 +19,12 @@ const minAttemptMs = 5000;
 const userAgent = "community-health-resource-finder (https://github.com/StaceyA132/community-health-resource-finder)";
 const cacheSeconds = 60 * 60;
 const searchRadiusMeters = 25000; // about 15 miles
+// Results kept per search, shared evenly between the requested categories. Overpass returns
+// places in ID order, not by distance, so we fetch everything in the area (up to a safety
+// limit) and keep the nearest ourselves; otherwise common categories like dentists could
+// crowd out rare ones like shelters.
 const maxResults = 300;
+const maxElements = 3000;
 
 export type Coordinates = { lat: number; lng: number };
 
@@ -106,7 +112,7 @@ export function buildOverpassQuery(center: Coordinates, categories: ResourceCate
   const lines = wanted.flatMap((category) =>
     categoryQueries[category].filters.map((filter) => `  nwr${filter}${around};`)
   );
-  return `[out:json][timeout:20];\n(\n${lines.join("\n")}\n);\nout center tags ${maxResults};`;
+  return `[out:json][timeout:20];\n(\n${lines.join("\n")}\n);\nout center tags ${maxElements};`;
 }
 
 export function parseOverpassElements(elements: OverpassElement[]): LiveResource[] {
@@ -167,11 +173,37 @@ export async function fetchLiveResources(
 
   // Identical searches made at the same time (re-renders, several open tabs) share one
   // request, which helps stay under the public server's rate limit.
-  const pending = inFlight.get(query);
-  if (pending) return pending;
-  const request = queryOverpass(query).finally(() => inFlight.delete(query));
-  inFlight.set(query, request);
-  return request;
+  let request = inFlight.get(query);
+  if (!request) {
+    request = queryOverpass(query).finally(() => inFlight.delete(query));
+    inFlight.set(query, request);
+  }
+  const places = await request;
+  return keepNearestPerCategory(places, center, categories.length ? categories : allCategories);
+}
+
+// Keeps the nearest places in each category, splitting maxResults evenly between them.
+// A place in several categories is kept if any of its categories still has room.
+export function keepNearestPerCategory(
+  places: LiveResource[],
+  center: Coordinates,
+  categories: ResourceCategory[]
+): LiveResource[] {
+  const perCategory = Math.floor(maxResults / categories.length);
+  const counts = new Map<ResourceCategory, number>();
+  const kept: LiveResource[] = [];
+
+  const byDistance = places
+    .map((place) => ({ place, distance: haversineMiles(center, place.coordinates) }))
+    .sort((a, b) => a.distance - b.distance);
+
+  for (const { place } of byDistance) {
+    const wanted = place.categories.filter((category) => categories.includes(category));
+    if (!wanted.some((category) => (counts.get(category) ?? 0) < perCategory)) continue;
+    kept.push(place);
+    for (const category of wanted) counts.set(category, (counts.get(category) ?? 0) + 1);
+  }
+  return kept;
 }
 
 const inFlight = new Map<string, Promise<LiveResource[]>>();

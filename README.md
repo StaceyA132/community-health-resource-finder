@@ -17,6 +17,7 @@ The API lives at `/api/resources`. By default it reads from `data/resources.ts`.
 Searches anywhere in the US also include nearby places from [OpenStreetMap](https://www.openstreetmap.org), fetched live through the free public [Overpass API](https://overpass-api.de) within about 15 miles. Zip codes are turned into map coordinates with [Zippopotam.us](https://zippopotam.us). Neither service needs an API key, and responses are cached for an hour.
 
 - OpenStreetMap listings are community-edited, so they show a "From OpenStreetMap" tag and ask people to call ahead. Your curated listings (sample data or Supabase) are always included alongside them.
+- Each search keeps up to 300 OpenStreetMap places, the nearest ones first, split evenly between the selected categories (about 42 each when all are selected). That stops common places like dentists from crowding out rarer ones like shelters.
 - If either service is down, the app still shows your curated listings.
 - To use a different Overpass server (for example, one you host for heavier traffic), set `OVERPASS_URL` in `.env.local`. You can list several, separated by commas; they're tried in order.
 - The public server is often busy. Busy (429) and timeout (5xx) responses are retried once within a 30-second budget, identical searches made at the same time share one request, and if it still fails the page says OpenStreetMap listings are unavailable and offers **Try again**.
