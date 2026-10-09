@@ -1,5 +1,5 @@
 # Community Health Resource Finder
-A small Next.js app that finds nearby health resources. Enter a ZIP code or allow geolocation to see clinics, food banks, pharmacies, shelters, and other low-cost services.
+A small Next.js app that finds nearby health resources. Enter a ZIP code or allow live location to see clinics, food banks, pharmacies, shelters, and other low-cost services.
 
 ## Quickstart (web)
 
@@ -20,7 +20,7 @@ The API lives at `/api/resources`. By default it reads from `data/resources.ts`.
   ```
   Use the service role key only on the server; never expose it to the client.
 - The route will automatically fetch from Supabase; if env vars are missing or Supabase errors, it falls back to the mock data.
-- Geolocation: the web UI can request your browser location to auto-center results; if denied or unavailable, it uses the entered zip or mock data.
+- Live location: the web UI asks for your browser location and keeps following it, refreshing results whenever you move about a tenth of a mile. Turn it off with **Stop live location**, or type a zip to search somewhere else. If location is denied or unavailable, it uses the entered zip.
 
 ## Editing data
 

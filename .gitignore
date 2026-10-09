@@ -5,3 +5,10 @@ yarn-error.log
 .DS_Store
 xcuserdata
 DerivedData
+
+# Local env files hold API keys (see README)
+.env*.local
+.env
+
+# TypeScript
+*.tsbuildinfo
