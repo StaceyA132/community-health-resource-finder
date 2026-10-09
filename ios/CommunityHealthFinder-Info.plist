@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Set by the API_BASE_URL build setting (Target > Build Settings in Xcode). -->
+	<key>APIBaseURL</key>
+	<string>$(API_BASE_URL)</string>
+	<!-- Lets the app reach the dev server over plain http on this Mac or your local network. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+</dict>
+</plist>

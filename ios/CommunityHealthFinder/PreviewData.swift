@@ -16,7 +16,8 @@ enum PreviewData {
             hours: "Mon–Sat 10a–8p",
             cost: "Free for SF residents",
             eligibility: "Open to all; priority for SF residents",
-            distance: 1.2
+            distance: 1.2,
+            source: "curated"
         ),
         Resource(
             id: "sf-free-clinic",
@@ -32,7 +33,8 @@ enum PreviewData {
             hours: "Mon–Fri 8a–5p",
             cost: "Free or sliding scale",
             eligibility: "Uninsured or underinsured",
-            distance: 3.1
+            distance: 3.1,
+            source: "curated"
         ),
         Resource(
             id: "nyc-urgent-care",
@@ -48,7 +50,8 @@ enum PreviewData {
             hours: "24/7",
             cost: "Sliding scale",
             eligibility: "Open to all",
-            distance: 0.6
+            distance: 0.6,
+            source: "curated"
         )
     ]
 }
