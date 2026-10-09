@@ -1,7 +1,10 @@
 import { Resource, ResourceCategory, categoryLabels } from "../data/resources";
 
 export type Coordinates = { lat: number; lng: number };
-export type SearchableResource = Omit<Resource, "coordinates"> & { coordinates: Coordinates | null };
+export type SearchableResource = Omit<Resource, "coordinates"> & {
+  coordinates: Coordinates | null;
+  source?: "curated" | "openstreetmap";
+};
 export type ResourceResult = SearchableResource & { distance: number | null };
 export type DataSource = "mock" | "supabase";
 export type SearchResponse = ReturnType<typeof applyFilters>;

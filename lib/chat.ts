@@ -40,14 +40,15 @@ export function validateReply(value: unknown, currentZip: string): ChatReply {
 }
 
 // Word prefixes that suggest each category, for when no AI service is configured.
+// A trailing "\\b" makes a keyword match only as a whole word.
 const categoryKeywords: Record<ResourceCategory, string[]> = {
   "mental-health": ["mental", "counsel", "therap", "anxiety", "anxious", "depress", "stress"],
-  "emergency-care": ["emergency", "urgent", "injur"],
-  "womens-health": ["women", "woman", "prenatal", "pregnan", "gyn", "reproductive", "birth control"],
+  "emergency-care": ["emergency", "urgent", "injur", "hospital", "er\\b"],
+  "womens-health": ["women", "woman", "prenatal", "pregnan", "gyn", "reproductive", "birth control", "contracepti"],
   pharmacy: ["pharmac", "prescription", "medication", "medicine", "refill"],
   dental: ["dental", "dentist", "teeth", "tooth", "toothache"],
   food: ["food", "hungry", "meal", "groceries", "grocery", "eat"],
-  shelter: ["shelter", "sleep", "housing", "homeless", "a bed"]
+  shelter: ["shelter", "sleep", "housing", "homeless", "a bed", "place to stay"]
 };
 
 export function localReply(message: string, zip: string): ChatReply {

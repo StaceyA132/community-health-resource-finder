@@ -2,11 +2,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
   DEFAULT_ZIP,
+  ResourceCategory,
   isResourceCategory,
   resources as mockResources,
   zipCoordinates
 } from "../../../data/resources";
-import { RADIUS_MILES, SearchableResource, applyFilters, boundingBox } from "../../../lib/geo";
+import {
+  Coordinates,
+  DataSource,
+  RADIUS_MILES,
+  SearchableResource,
+  applyFilters,
+  boundingBox,
+  haversineMiles
+} from "../../../lib/geo";
+import { LiveResource, fetchLiveResources, lookupZip } from "../../../lib/liveResources";
 
 const supabaseUrl = process.env.SUPABASE_URL;
 // The anon key respects Row Level Security. The service-role key bypasses it, so it is
@@ -50,15 +60,45 @@ export async function GET(req: NextRequest) {
   const lng = lngParam ? Number.parseFloat(lngParam) : NaN;
   const hasCoords = Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
 
-  const userCoords = hasCoords ? { lat, lng, city: "Your location" } : zipCoordinates[zip];
+  const userCoords = hasCoords
+    ? { lat, lng, city: "Your location" }
+    : zipCoordinates[zip] ?? (await lookupZip(zip).catch(() => undefined));
 
   const selectedCategories =
     searchParams.get("categories")?.split(",").filter(isResourceCategory) ?? [];
 
+  // Curated listings (Supabase, or the sample data) and nearby OpenStreetMap places load in
+  // parallel. Either one failing still leaves the other's results.
+  const [curated, live] = await Promise.all([
+    loadCurated(selectedCategories, userCoords),
+    userCoords
+      ? fetchLiveResources(userCoords, selectedCategories).catch((error) => {
+          console.error("OpenStreetMap lookup failed", error);
+          return null;
+        })
+      : Promise.resolve(null)
+  ]);
+
+  const combined = [...curated.resources, ...dedupeLive(live ?? [], curated.resources)];
+  const response = applyFilters(combined, userCoords, selectedCategories, zip, curated.source);
+
+  return NextResponse.json({
+    ...response,
+    metadata: { ...response.metadata, liveData: live !== null }
+  });
+}
+
+async function loadCurated(
+  selectedCategories: ResourceCategory[],
+  userCoords: Coordinates | undefined
+): Promise<{ resources: SearchableResource[]; source: DataSource }> {
+  const mock = {
+    resources: mockResources.map((r) => ({ ...r, source: "curated" as const })),
+    source: "mock" as const
+  };
+
   // If Supabase is not configured, fall back to mock data.
-  if (!supabase) {
-    return NextResponse.json(applyFilters(mockResources, userCoords, selectedCategories, zip, "mock"));
-  }
+  if (!supabase) return mock;
 
   let query = supabase.from("resources").select("*").eq("verified", true).limit(MAX_ROWS);
 
@@ -78,7 +118,7 @@ export async function GET(req: NextRequest) {
 
   if (error || !data) {
     console.error("Supabase error", error);
-    return NextResponse.json(applyFilters(mockResources, userCoords, selectedCategories, zip, "mock"));
+    return mock;
   }
 
   const normalized: SearchableResource[] = (data as DbResource[]).map((row) => ({
@@ -95,8 +135,23 @@ export async function GET(req: NextRequest) {
     hours: row.hours,
     cost: row.cost,
     eligibility: row.eligibility,
-    coordinates: row.lat !== null && row.lng !== null ? { lat: row.lat, lng: row.lng } : null
+    coordinates: row.lat !== null && row.lng !== null ? { lat: row.lat, lng: row.lng } : null,
+    source: "curated"
   }));
 
-  return NextResponse.json(applyFilters(normalized, userCoords, selectedCategories, zip, "supabase"));
+  return { resources: normalized, source: "supabase" };
+}
+
+// Skip OpenStreetMap places that are already in the curated list (same name, within ~200 m).
+function dedupeLive(live: LiveResource[], curated: SearchableResource[]) {
+  const normalize = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return live.filter(
+    (place) =>
+      !curated.some(
+        (entry) =>
+          entry.coordinates &&
+          normalize(entry.name) === normalize(place.name) &&
+          haversineMiles(entry.coordinates, place.coordinates) < 0.125
+      )
+  );
 }

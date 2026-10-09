@@ -5,8 +5,10 @@ yarn-error.log
 .DS_Store
 xcuserdata
 DerivedData
-*.tsbuildinfo
 
-# Secrets — never commit real keys
-.env
+# Local env files hold API keys (see README) — never commit real keys
 .env*.local
+.env
+
+# TypeScript
+*.tsbuildinfo

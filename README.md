@@ -1,5 +1,5 @@
 # Community Health Resource Finder
-A small Next.js app that finds nearby health resources. Enter a ZIP code or allow geolocation to see clinics, food banks, pharmacies, shelters, and other low-cost services.
+A small Next.js app that finds nearby health resources. Enter a ZIP code or allow live location to see clinics, food banks, pharmacies, shelters, and other low-cost services.
 
 ## Quickstart (web)
 
@@ -9,6 +9,15 @@ A small Next.js app that finds nearby health resources. Enter a ZIP code or allo
 4. Run tests: `npm test`
 
 The API lives at `/api/resources`. By default it reads from `data/resources.ts`. Filter with `?zip=94103&categories=mental-health,pharmacy`.
+
+### Nationwide data (no setup needed)
+
+Searches anywhere in the US also include nearby places from [OpenStreetMap](https://www.openstreetmap.org), fetched live through the free public [Overpass API](https://overpass-api.de) within about 15 miles. Zip codes are turned into map coordinates with [Zippopotam.us](https://zippopotam.us). Neither service needs an API key, and responses are cached for an hour.
+
+- OpenStreetMap listings are community-edited, so they show a "From OpenStreetMap" tag and ask people to call ahead. Your curated listings (sample data or Supabase) are always included alongside them.
+- If either service is down, the app still shows your curated listings.
+- To use a different Overpass server (for example, one you host for heavier traffic), set `OVERPASS_URL` in `.env.local`.
+- The public Overpass server is shared and rate-limited. It suits a demo or a small app, but a busy production site should host its own server or use a paid provider.
 
 ### Connect to Supabase (optional, replaces mock data)
 - Create a table `resources` with columns:  
@@ -21,15 +30,15 @@ The API lives at `/api/resources`. By default it reads from `data/resources.ts`.
   SUPABASE_ANON_KEY=your-anon-key
   ```
   Use the anon key so Row Level Security applies. `SUPABASE_SERVICE_ROLE_KEY` still works as a fallback, but it bypasses RLS, so avoid it. Either way, the API only returns rows where `verified` is true.
-- The route will automatically fetch from Supabase; if env vars are missing or Supabase errors, it falls back to the sample data, and the UI labels results as sample listings.
+- The route will automatically fetch from Supabase; if env vars are missing or Supabase errors, it falls back to the sample data, and the UI labels it as sample listings.
 - Queries are narrowed to a lat/lng box around the user before exact distance filtering, and capped at 500 rows. Index `lat` and `lng` (or move to PostGIS) as the table grows.
-- Geolocation: the web UI can request your browser location to auto-center results; if denied or unavailable, it uses the entered ZIP. Entering a different ZIP replaces the detected location.
+- Live location: the web UI asks for your browser location and keeps following it, refreshing results whenever you move about a tenth of a mile. Turn it off with **Stop live location**, or type a zip to search somewhere else. If location is denied or unavailable, it uses the entered zip.
 
 ## Editing data
 
 - Update or extend the seed data in `data/resources.ts`.
 - Each entry supports categories: `mental-health`, `emergency-care`, `womens-health`, `pharmacy`, `dental`, `food`, `shelter`.
-- ZIP-to-coordinate hints are in `zipCoordinates` for distance sorting and a 60-mile radius filter. Only the listed ZIPs are supported; other ZIPs show all resources with a notice. A real deployment needs a full ZIP dataset or geocoding API.
+- Zip-to-coordinate hints are in `zipCoordinates` for rough distance sorting and a 60-mile radius filter; other ZIPs are looked up with Zippopotam.us.
 - The seed data is for demos only: some names, phone numbers and websites are made up.
 
 ## Resource helper chat

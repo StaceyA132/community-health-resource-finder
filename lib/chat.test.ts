@@ -42,7 +42,10 @@ describe("localReply", () => {
     ["Where can I get food today?", ["food"]],
     ["I need a safe place to sleep", ["shelter"]],
     ["need a prescription refill and a therapist", ["mental-health", "pharmacy"]],
-    ["it's a great day", []]
+    ["it's a great day", []],
+    ["do I need the ER?", ["emergency-care"]],
+    ["every error I get", []],
+    ["I need a place to stay tonight", ["shelter"]]
   ])("maps %s to the right categories", (message, expected) => {
     expect(localReply(message, "94103").categories).toEqual(expected);
   });
