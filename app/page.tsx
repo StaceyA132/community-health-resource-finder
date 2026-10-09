@@ -7,10 +7,15 @@ import {
   categoryLabels
 } from "../data/resources";
 
+type ResultResource = Resource & {
+  distance: number | null;
+  source?: "curated" | "openstreetmap";
+};
+
 type ApiResult = {
   zip: string;
   locationLabel: string;
-  results: Array<Resource & { distance: number | null }>;
+  results: ResultResource[];
   metadata: { radiusMiles: number; matchedCount: number; centered: boolean };
   availableCategories: typeof categoryLabels;
 };
@@ -231,14 +236,14 @@ export default function Home() {
         <span className="badge">Community Health Resource Finder</span>
         <h1>Find free and low-cost health resources near you.</h1>
         <p>
-          Enter a zip code to see clinics, counseling, pharmacies, dental care,
-          food banks, and shelters. Everything is verified and filterable by
-          category.
+          Enter a zip code or share your location to see clinics, counseling,
+          pharmacies, dental care, food banks, and shelters anywhere in the US,
+          filterable by category.
         </p>
         <div className="pill-row">
           <span className="pill active">Zip-based search</span>
           <span className="pill">Live location</span>
-          <span className="pill">Verified resources</span>
+          <span className="pill">Nationwide listings</span>
         </div>
       </div>
 
@@ -311,8 +316,12 @@ export default function Home() {
       )}
 
       <p className="footer-note">
-        Add or edit a listing by updating `data/resources.ts` or connecting a real data
-        source later.
+        Listings marked “From OpenStreetMap” come from a free community map and may be out of
+        date, so call ahead to confirm hours, cost, and eligibility. Map data ©{" "}
+        <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">
+          OpenStreetMap contributors
+        </a>
+        .
       </p>
 
       <button className="chat-launcher" type="button" onClick={() => setChatOpen((open) => !open)} aria-expanded={chatOpen}>
@@ -344,7 +353,7 @@ export default function Home() {
   );
 }
 
-function ResourceCard({ resource }: { resource: Resource & { distance: number | null } }) {
+function ResourceCard({ resource }: { resource: ResultResource }) {
   return (
     <article className="resource-card">
       <div className="meta-row">
@@ -355,10 +364,21 @@ function ResourceCard({ resource }: { resource: Resource & { distance: number | 
         ))}
       </div>
       <h3>{resource.name}</h3>
+      {resource.source === "openstreetmap" && (
+        <span
+          className="tag"
+          style={{ alignSelf: "flex-start" }}
+          title="Community-edited listing. Call ahead to confirm details."
+        >
+          From OpenStreetMap
+        </span>
+      )}
       <p style={{ margin: "0", color: "var(--muted)" }}>{resource.description}</p>
       <div className="meta-row">
         <span>
-          {resource.address}, {resource.city}, {resource.state} {resource.zip}
+          {[resource.address, resource.city, [resource.state, resource.zip].filter(Boolean).join(" ")]
+            .filter(Boolean)
+            .join(", ")}
         </span>
         {resource.distance !== null && (
           <span>{resource.distance.toFixed(1)} mi away</span>
