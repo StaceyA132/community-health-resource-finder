@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Resource,
   ResourceCategory,
@@ -26,6 +26,19 @@ type ChatReply = {
 };
 
 const defaultZip = "94103";
+
+// Only refetch once the user has moved this far, so GPS jitter doesn't spam the API.
+const refetchDistanceMiles = 0.1;
+
+const milesBetween = (a: Coordinates, b: Coordinates) => {
+  const toRad = (value: number) => (value * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.sin(dLng / 2) ** 2 * Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat));
+  return 2 * 3958.8 * Math.asin(Math.min(1, Math.sqrt(h)));
+};
 
 const categoryOrder: ResourceCategory[] = [
   "mental-health",
@@ -54,17 +67,23 @@ export default function Home() {
     { role: "assistant", text: "Hi! I can help you find verified community resources. What are you looking for?" }
   ]);
 
-  const toggleCategory = (category: ResourceCategory) => {
-    setSelectedCategories((current) =>
-      current.includes(category)
-        ? current.filter((c) => c !== category)
-        : [...current, category]
-    );
-  };
+  const [tracking, setTracking] = useState(false);
+
+  // Live location updates arrive in a long-lived callback, so it reads the latest
+  // search inputs from refs rather than from the render it was created in.
+  const zipRef = useRef(zip);
+  const categoriesRef = useRef(selectedCategories);
+  const coordsRef = useRef<Coordinates | null>(null);
+  const watchIdRef = useRef<number | null>(null);
+  const requestIdRef = useRef(0);
+  zipRef.current = zip;
+  categoriesRef.current = selectedCategories;
+  coordsRef.current = geoCoords;
 
   // Takes every input explicitly so callbacks (geolocation, chat) never read stale state.
   const loadResources = useCallback(
     async (nextZip: string, nextCategories: ResourceCategory[], coords: Coordinates | null) => {
+      const requestId = ++requestIdRef.current;
       setLoading(true);
       setError(null);
       try {
@@ -80,52 +99,81 @@ export default function Home() {
         const response = await fetch(`/api/resources?${params.toString()}`);
         if (!response.ok) throw new Error(`Resource request failed: ${response.status}`);
         const json = (await response.json()) as ApiResult;
+        // Live updates can overlap; only the newest request may update the list.
+        if (requestId !== requestIdRef.current) return;
 
         setResults(json.results);
         setLocationLabel(json.locationLabel);
         setMetadata(json.metadata);
       } catch (err) {
+        if (requestId !== requestIdRef.current) return;
         console.error(err);
         setError("Could not load resources. Please try again.");
       } finally {
-        setLoading(false);
+        if (requestId === requestIdRef.current) setLoading(false);
       }
     },
     []
   );
 
-  const locate = useCallback(
-    (nextZip: string, nextCategories: ResourceCategory[]) => {
-      if (typeof navigator === "undefined" || !("geolocation" in navigator)) {
-        setGeoStatus("Geolocation not supported by this browser.");
-        return;
-      }
-      setGeoStatus("Locating...");
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-          setGeoCoords(coords);
-          setGeoStatus("Location detected.");
-          loadResources(nextZip, nextCategories, coords);
-        },
-        (err) => {
-          console.error(err);
-          setGeoStatus("Could not get location. Check permissions.");
-        },
-        { timeout: 8000 }
-      );
-    },
-    [loadResources]
-  );
+  const stopTracking = useCallback(() => {
+    if (watchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+    setTracking(false);
+  }, []);
+
+  const startTracking = useCallback(() => {
+    if (typeof navigator === "undefined" || !("geolocation" in navigator)) {
+      setGeoStatus("Geolocation not supported by this browser.");
+      return;
+    }
+    if (watchIdRef.current !== null) return;
+
+    setTracking(true);
+    setGeoStatus("Locating...");
+    watchIdRef.current = navigator.geolocation.watchPosition(
+      (pos) => {
+        const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        const previous = coordsRef.current;
+        const time = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+        setGeoStatus(`Live location on · updated ${time}`);
+        if (previous && milesBetween(previous, coords) < refetchDistanceMiles) return;
+
+        coordsRef.current = coords;
+        setGeoCoords(coords);
+        loadResources(zipRef.current, categoriesRef.current, coords);
+      },
+      (err) => {
+        console.error(err);
+        if (err.code === err.PERMISSION_DENIED) {
+          if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
+          watchIdRef.current = null;
+          setTracking(false);
+          setGeoStatus("Location permission denied. Search by zip instead.");
+        } else {
+          setGeoStatus("Can’t get your location right now. Still trying…");
+        }
+      },
+      { enableHighAccuracy: true, maximumAge: 15000, timeout: 20000 }
+    );
+  }, [loadResources]);
 
   useEffect(() => {
-    // Load resources immediately for the default zip, then try to auto-detect location
-    // to improve relevance.
+    // Show the default zip right away, then follow the user's live location if they allow it.
     loadResources(defaultZip, [], null);
-    if (typeof navigator !== "undefined" && "geolocation" in navigator) {
-      locate(defaultZip, []);
-    }
-  }, [loadResources, locate]);
+    startTracking();
+    return stopTracking;
+  }, [loadResources, startTracking, stopTracking]);
+
+  const toggleCategory = (category: ResourceCategory) => {
+    const next = selectedCategories.includes(category)
+      ? selectedCategories.filter((c) => c !== category)
+      : [...selectedCategories, category];
+    setSelectedCategories(next);
+    loadResources(zip, next, geoCoords);
+  };
 
   const selectedLabel = useMemo(() => {
     if (!selectedCategories.length) return "All categories";
@@ -134,7 +182,8 @@ export default function Home() {
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
-    // A typed zip is an explicit choice, so stop centering on the detected location.
+    // A typed zip is an explicit choice, so stop following the user's location.
+    stopTracking();
     setGeoCoords(null);
     setGeoStatus(null);
     loadResources(zip, selectedCategories, null);
@@ -161,6 +210,7 @@ export default function Home() {
       // Asking about a different zip means searching there, not around the detected location.
       const coords = nextZip === zip ? geoCoords : null;
       if (nextZip !== zip) {
+        stopTracking();
         setZip(nextZip);
         setGeoCoords(null);
         setGeoStatus(null);
@@ -187,7 +237,7 @@ export default function Home() {
         </p>
         <div className="pill-row">
           <span className="pill active">Zip-based search</span>
-          <span className="pill">Geolocation-ready</span>
+          <span className="pill">Live location</span>
           <span className="pill">Verified resources</span>
         </div>
       </div>
@@ -207,8 +257,13 @@ export default function Home() {
           </button>
         </form>
         <div className="geo-row">
-          <button type="button" className="ghost-button" onClick={() => locate(zip, selectedCategories)} disabled={loading}>
-            Use my location
+          <button type="button" className="ghost-button" onClick={() => {
+              if (!tracking) return startTracking();
+              stopTracking();
+              setGeoStatus("Live location off. Showing results near your last location.");
+            }}
+          >
+            {tracking ? "Stop live location" : "Use my live location"}
           </button>
           <span className="geo-status">{geoStatus ?? "We’ll search near your zip or location."}</span>
         </div>
