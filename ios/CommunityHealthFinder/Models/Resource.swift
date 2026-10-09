@@ -11,6 +11,7 @@ struct Metadata: Decodable {
     let radiusMiles: Double
     let matchedCount: Int
     let centered: Bool
+    let source: String?
 }
 
 struct Resource: Decodable, Identifiable {

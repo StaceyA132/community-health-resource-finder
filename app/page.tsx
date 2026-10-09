@@ -1,107 +1,122 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Resource,
+  DEFAULT_ZIP,
   ResourceCategory,
-  categoryLabels
+  categoryLabels,
+  resourceCategories
 } from "../data/resources";
+import type { ChatReply } from "../lib/chat";
+import type { Coordinates, ResourceResult, SearchResponse } from "../lib/geo";
+import { isSafeWebUrl, telHref } from "../lib/url";
 
-type ApiResult = {
-  zip: string;
-  locationLabel: string;
-  results: Array<Resource & { distance: number | null }>;
-  metadata: { radiusMiles: number; matchedCount: number; centered: boolean };
-  availableCategories: typeof categoryLabels;
-};
+type Search = { zip: string; categories: ResourceCategory[]; coords: Coordinates | null };
+type ChatMessage = { role: "assistant" | "user"; text: string; emergency?: boolean };
 
-type ChatMessage = { role: "assistant" | "user"; text: string };
-type ChatReply = {
-  message: string;
-  categories: ResourceCategory[];
-  zip?: string;
-  emergency: boolean;
-};
+const zipPattern = /^\d{5}$/;
 
-const categoryOrder: ResourceCategory[] = [
-  "mental-health",
-  "emergency-care",
-  "womens-health",
-  "pharmacy",
-  "dental",
-  "food",
-  "shelter"
-];
+function getCurrentCoords(): Promise<Coordinates> {
+  return new Promise((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      reject,
+      { timeout: 8000 }
+    );
+  });
+}
 
 export default function Home() {
-  const [zip, setZip] = useState("94103");
-  const [selectedCategories, setSelectedCategories] = useState<ResourceCategory[]>([]);
-  const [geoCoords, setGeoCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [zipInput, setZipInput] = useState(DEFAULT_ZIP);
+  const [zipError, setZipError] = useState<string | null>(null);
+  // The search that results are shown for. Changing it triggers a fetch.
+  const [search, setSearch] = useState<Search>({ zip: DEFAULT_ZIP, categories: [], coords: null });
   const [geoStatus, setGeoStatus] = useState<string | null>(null);
-  const [results, setResults] = useState<ApiResult["results"]>([]);
-  const [locationLabel, setLocationLabel] = useState("");
-  const [metadata, setMetadata] = useState<ApiResult["metadata"] | null>(null);
+  const [response, setResponse] = useState<SearchResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    { role: "assistant", text: "Hi! I can help you find verified community resources. What are you looking for?" }
+    { role: "assistant", text: "Hi! I can help you find community resources. What are you looking for?" }
   ]);
 
-  const toggleCategory = (category: ResourceCategory) => {
-    setSelectedCategories((current) =>
-      current.includes(category)
-        ? current.filter((c) => c !== category)
-        : [...current, category]
-    );
-  };
+  useEffect(() => {
+    const controller = new AbortController();
+    const params = new URLSearchParams({ zip: search.zip });
+    if (search.categories.length) params.set("categories", search.categories.join(","));
+    if (search.coords) {
+      params.set("lat", String(search.coords.lat));
+      params.set("lng", String(search.coords.lng));
+    }
 
-  const fetchResources = async () => {
     setLoading(true);
     setError(null);
+    fetch(`/api/resources?${params.toString()}`, { signal: controller.signal })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`Resource request failed: ${res.status}`);
+        setResponse((await res.json()) as SearchResponse);
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        console.error(err);
+        setError("Could not load resources. Please try again.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+
+    // A newer search cancels this one, so slow responses can't overwrite newer results.
+    return () => controller.abort();
+  }, [search]);
+
+  const findMyLocation = useCallback(async () => {
+    if (!("geolocation" in navigator)) {
+      setGeoStatus("Geolocation not supported by this browser.");
+      return;
+    }
+    setGeoStatus("Locating...");
     try {
-      const params = new URLSearchParams({ zip });
-      if (selectedCategories.length) {
-        params.set("categories", selectedCategories.join(","));
-      }
-      if (geoCoords) {
-        params.set("lat", String(geoCoords.lat));
-        params.set("lng", String(geoCoords.lng));
-      }
-
-      const response = await fetch(`/api/resources?${params.toString()}`);
-      const json = (await response.json()) as ApiResult;
-
-      setResults(json.results);
-      setLocationLabel(json.locationLabel);
-      setMetadata(json.metadata);
+      const coords = await getCurrentCoords();
+      setSearch((current) => ({ ...current, coords }));
+      setGeoStatus("Using your current location.");
     } catch (err) {
       console.error(err);
-      setError("Could not load resources. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    // Load resources immediately for the default zip, then try to auto-detect location
-    // to improve relevance.
-    fetchResources();
-    if (typeof navigator !== "undefined" && "geolocation" in navigator) {
-      findMyLocation();
+      setGeoStatus("Could not get location. Check permissions.");
     }
   }, []);
 
+  useEffect(() => {
+    // Results load for the default ZIP right away; this narrows them once location is known.
+    findMyLocation();
+  }, [findMyLocation]);
+
+  const toggleCategory = (category: ResourceCategory) => {
+    setSearch((current) => ({
+      ...current,
+      categories: current.categories.includes(category)
+        ? current.categories.filter((c) => c !== category)
+        : [...current.categories, category]
+    }));
+  };
+
   const selectedLabel = useMemo(() => {
-    if (!selectedCategories.length) return "All categories";
-    return selectedCategories.map((c) => categoryLabels[c]).join(", ");
-  }, [selectedCategories]);
+    if (!search.categories.length) return "All categories";
+    return search.categories.map((c) => categoryLabels[c]).join(", ");
+  }, [search.categories]);
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
-    fetchResources();
+    const zip = zipInput.trim();
+    if (!zipPattern.test(zip)) {
+      setZipError("Enter a 5-digit ZIP code.");
+      return;
+    }
+    setZipError(null);
+    // A newly entered ZIP replaces the detected location.
+    if (zip !== search.zip) setGeoStatus(null);
+    setSearch((current) => ({ ...current, zip, coords: zip === current.zip ? current.coords : null }));
   };
 
   const sendChatMessage = async (preset?: string) => {
@@ -112,20 +127,30 @@ export default function Home() {
     setChatInput("");
     setChatLoading(true);
     try {
-      const response = await fetch("/api/chat", {
+      const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, zip })
+        body: JSON.stringify({ message, zip: search.zip })
       });
-      if (!response.ok) throw new Error("Chat request failed");
-      const reply = (await response.json()) as ChatReply;
-      setChatMessages((current) => [...current, { role: "assistant", text: reply.message }]);
-      if (reply.zip) setZip(reply.zip);
-      if (reply.categories.length) {
-        setSelectedCategories(reply.categories);
+      if (!res.ok) throw new Error("Chat request failed");
+      const reply = (await res.json()) as ChatReply;
+      setChatMessages((current) => [
+        ...current,
+        { role: "assistant", text: reply.message, emergency: reply.emergency }
+      ]);
+
+      const newZip = reply.zip && reply.zip !== search.zip ? reply.zip : null;
+      if (newZip || reply.categories.length) {
+        setSearch((current) => ({
+          zip: newZip ?? current.zip,
+          categories: reply.categories.length ? reply.categories : current.categories,
+          // A ZIP named in chat replaces the detected location.
+          coords: newZip ? null : current.coords
+        }));
       }
-      if (reply.categories.length || reply.zip) {
-        await fetchResourcesFor(reply.zip ?? zip, reply.categories.length ? reply.categories : selectedCategories);
+      if (newZip) {
+        setZipInput(newZip);
+        setGeoStatus(null);
       }
     } catch (err) {
       console.error(err);
@@ -135,49 +160,12 @@ export default function Home() {
     }
   };
 
-  const fetchResourcesFor = async (nextZip: string, nextCategories: ResourceCategory[]) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams({ zip: nextZip });
-      if (nextCategories.length) params.set("categories", nextCategories.join(","));
-      if (geoCoords) {
-        params.set("lat", String(geoCoords.lat));
-        params.set("lng", String(geoCoords.lng));
-      }
-      const response = await fetch(`/api/resources?${params.toString()}`);
-      const json = (await response.json()) as ApiResult;
-      setResults(json.results);
-      setLocationLabel(json.locationLabel);
-      setMetadata(json.metadata);
-    } catch (err) {
-      console.error(err);
-      setError("Could not load resources. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  };
+  const results = response?.results ?? [];
+  const metadata = response?.metadata;
 
-  const findMyLocation = () => {
-    if (!("geolocation" in navigator)) {
-      setGeoStatus("Geolocation not supported by this browser.");
-      return;
-    }
-    setGeoStatus("Locating...");
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const { latitude, longitude } = pos.coords;
-        setGeoCoords({ lat: latitude, lng: longitude });
-        setGeoStatus("Location detected.");
-        fetchResources();
-      },
-      (err) => {
-        console.error(err);
-        setGeoStatus("Could not get location. Check permissions.");
-      },
-      { timeout: 8000 }
-    );
-  };
+  let locationSummary = `ZIP ${search.zip}`;
+  if (search.coords) locationSummary = "Near your current location";
+  else if (metadata?.centered) locationSummary = `${response?.locationLabel} • ZIP ${search.zip}`;
 
   return (
     <div className="wrapper">
@@ -185,14 +173,14 @@ export default function Home() {
         <span className="badge">Community Health Resource Finder</span>
         <h1>Find free and low-cost health resources near you.</h1>
         <p>
-          Enter a zip code to see clinics, counseling, pharmacies, dental care,
-          food banks, and shelters. Everything is verified and filterable by
-          category.
+          Enter a ZIP code to see clinics, counseling, pharmacies, dental care,
+          food banks, and shelters. Filter by what you need, and call ahead to
+          confirm hours and eligibility.
         </p>
         <div className="pill-row">
-          <span className="pill active">Zip-based search</span>
+          <span className="pill active">ZIP-based search</span>
           <span className="pill">Geolocation-ready</span>
-          <span className="pill">Verified resources</span>
+          <span className="pill">Free &amp; low-cost</span>
         </div>
       </div>
 
@@ -200,30 +188,35 @@ export default function Home() {
         <form onSubmit={onSubmit} className="input-row">
           <input
             type="text"
-            value={zip}
-            onChange={(e) => setZip(e.target.value)}
-            placeholder="Enter zip code e.g. 94103"
-            maxLength={10}
-            aria-label="Zip code"
+            inputMode="numeric"
+            value={zipInput}
+            onChange={(e) => setZipInput(e.target.value)}
+            placeholder="Enter ZIP code e.g. 94103"
+            maxLength={5}
+            aria-label="ZIP code"
+            aria-invalid={Boolean(zipError)}
+            aria-describedby={zipError ? "zip-error" : undefined}
           />
           <button className="primary-button" type="submit" disabled={loading}>
             {loading ? "Searching..." : "Find resources"}
           </button>
         </form>
+        {zipError && <p id="zip-error" className="field-error">{zipError}</p>}
         <div className="geo-row">
           <button type="button" className="ghost-button" onClick={findMyLocation} disabled={loading}>
             Use my location
           </button>
-          <span className="geo-status">{geoStatus ?? "We’ll search near your zip or location."}</span>
+          <span className="geo-status">{geoStatus ?? "We’ll search near your ZIP or location."}</span>
         </div>
 
         <div>
           <div className="pill-row">
-            {categoryOrder.map((cat) => (
+            {resourceCategories.map((cat) => (
               <button
                 key={cat}
                 type="button"
-                className={`pill ${selectedCategories.includes(cat) ? "active" : ""}`}
+                className={`pill ${search.categories.includes(cat) ? "active" : ""}`}
+                aria-pressed={search.categories.includes(cat)}
                 onClick={() => toggleCategory(cat)}
               >
                 {categoryLabels[cat]}
@@ -237,20 +230,33 @@ export default function Home() {
       </div>
 
       {error && (
-        <div className="resource-card" style={{ borderColor: "#f43f5e" }}>
+        <div className="resource-card" role="alert" style={{ borderColor: "#f43f5e" }}>
           {error}
         </div>
       )}
 
-      {!error && (
+      {!error && response && (
         <div style={{ marginTop: "1.5rem" }}>
+          {metadata?.source === "mock" && (
+            <p className="notice">
+              These are sample listings for demonstration. Some names and phone numbers are
+              made up, so don’t rely on them for care.
+            </p>
+          )}
+          {!metadata?.centered && (
+            <p className="notice">
+              We don’t have location data for ZIP {search.zip} yet, so results aren’t limited
+              to your area or sorted by distance. Try “Use my location” instead.
+            </p>
+          )}
           <div className="meta-row" style={{ marginBottom: "0.75rem" }}>
             <strong>{results.length} resources</strong>
-            <span>
-              {locationLabel} {metadata?.centered ? "" : "(approximate)"} • Zip {zip}
-            </span>
+            <span>{locationSummary}</span>
           </div>
 
+          {results.length === 0 && (
+            <p className="notice">No resources matched. Try removing a category filter.</p>
+          )}
           <div className="resource-grid">
             {results.map((resource) => (
               <ResourceCard key={resource.id} resource={resource} />
@@ -260,8 +266,8 @@ export default function Home() {
       )}
 
       <p className="footer-note">
-        Add or edit a listing by updating `data/resources.ts` or connecting a real data
-        source later.
+        Listings can change. Call ahead to confirm hours, cost, and eligibility. In an
+        emergency, call 911. For a mental-health crisis, call or text 988.
       </p>
 
       <button className="chat-launcher" type="button" onClick={() => setChatOpen((open) => !open)} aria-expanded={chatOpen}>
@@ -275,9 +281,17 @@ export default function Home() {
             <button type="button" className="chat-close" onClick={() => setChatOpen(false)} aria-label="Close chat">×</button>
           </div>
           <div className="chat-messages" aria-live="polite">
-            {chatMessages.map((chat, index) => <p key={index} className={`chat-message ${chat.role}`}>{chat.text}</p>)}
+            {chatMessages.map((chat, index) => (
+              <p key={index} className={`chat-message ${chat.role}${chat.emergency ? " emergency" : ""}`}>
+                {chat.text}
+              </p>
+            ))}
             {chatLoading && <p className="chat-message assistant">Finding the best filters…</p>}
           </div>
+          <p className="chat-privacy">
+            Messages may be processed by an AI service. Please don’t share your name or
+            personal health details.
+          </p>
           <div className="chat-suggestions">
             {["I need affordable dental care", "Where can I get food today?", "I need a safe place to sleep"].map((suggestion) => (
               <button key={suggestion} type="button" onClick={() => sendChatMessage(suggestion)}>{suggestion}</button>
@@ -293,7 +307,7 @@ export default function Home() {
   );
 }
 
-function ResourceCard({ resource }: { resource: Resource & { distance: number | null } }) {
+function ResourceCard({ resource }: { resource: ResourceResult }) {
   return (
     <article className="resource-card">
       <div className="meta-row">
@@ -319,9 +333,9 @@ function ResourceCard({ resource }: { resource: Resource & { distance: number | 
         <span className="tag">Eligibility: {resource.eligibility}</span>
       </div>
       <div className="meta-row">
-        {resource.phone && <span>{resource.phone}</span>}
-        {resource.website && (
-          <a href={resource.website} target="_blank" rel="noreferrer">
+        {resource.phone && <a href={telHref(resource.phone)}>{resource.phone}</a>}
+        {resource.website && isSafeWebUrl(resource.website) && (
+          <a href={resource.website} target="_blank" rel="noopener noreferrer">
             Website
           </a>
         )}

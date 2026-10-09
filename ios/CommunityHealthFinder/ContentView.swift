@@ -16,13 +16,13 @@ struct ContentView: View {
             .navigationTitle("Health Finder")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Mock data") {
+                    Button("Sample data") {
                         service.loadMock()
                     }
                 }
             }
             .task {
-                await service.fetch(zip: zip, categories: Array(selectedCategories))
+                service.search(zip: zip, categories: selectedCategories)
             }
         }
     }
@@ -38,9 +38,7 @@ struct ContentView: View {
                     .keyboardType(.numberPad)
                     .textFieldStyle(.roundedBorder)
                 Button {
-                    Task {
-                        await service.fetch(zip: zip, categories: Array(selectedCategories))
-                    }
+                    service.search(zip: zip, categories: selectedCategories)
                 } label: {
                     if service.isLoading {
                         ProgressView()
@@ -54,6 +52,11 @@ struct ContentView: View {
                 Text("Results near \(service.locationLabel)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+            if service.isSampleData {
+                Text("Sample listings for demonstration. Some details are made up.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
             }
             if let message = service.errorMessage {
                 Text(message)
@@ -103,6 +106,18 @@ struct ContentView: View {
                     Text(resource.cost)
                 }
                 .font(.caption2)
+                HStack(spacing: 16) {
+                    if let phone = resource.phone, let url = URL(string: "tel:\(phone.filter { $0.isNumber || $0 == "+" })") {
+                        Link(phone, destination: url)
+                    }
+                    if let website = resource.website, let url = URL(string: website),
+                       ["http", "https"].contains(url.scheme?.lowercased()) {
+                        Link("Website", destination: url)
+                    }
+                }
+                .font(.caption)
+                // Lets each link be tapped on its own inside the list row.
+                .buttonStyle(.borderless)
             }
         }
         .listStyle(.plain)
@@ -114,9 +129,7 @@ struct ContentView: View {
         } else {
             selectedCategories.insert(category)
         }
-        Task {
-            await service.fetch(zip: zip, categories: Array(selectedCategories))
-        }
+        service.search(zip: zip, categories: selectedCategories)
     }
 }
 

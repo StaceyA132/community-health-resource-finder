@@ -34,6 +34,13 @@ export const categoryLabels: Record<ResourceCategory, string> = {
   shelter: "Shelter"
 };
 
+export const resourceCategories = Object.keys(categoryLabels) as ResourceCategory[];
+
+export const isResourceCategory = (value: string): value is ResourceCategory =>
+  (resourceCategories as string[]).includes(value);
+
+export const DEFAULT_ZIP = "94103";
+
 export const zipCoordinates: Record<string, { lat: number; lng: number; city: string }> = {
   "94103": { lat: 37.7749, lng: -122.4194, city: "San Francisco, CA" },
   "10001": { lat: 40.7128, lng: -74.006, city: "New York, NY" },
@@ -42,6 +49,8 @@ export const zipCoordinates: Record<string, { lat: number; lng: number; city: st
   "78701": { lat: 30.2672, lng: -97.7431, city: "Austin, TX" }
 };
 
+// Sample listings for development and demos. Some names, phone numbers and websites are
+// made up, so the UI labels these results as sample data.
 export const resources: Resource[] = [
   {
     id: "sf-free-clinic",
