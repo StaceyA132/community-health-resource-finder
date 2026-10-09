@@ -10,6 +10,7 @@ import {
 import {
   Coordinates,
   DataSource,
+  LiveDataStatus,
   RADIUS_MILES,
   SearchableResource,
   applyFilters,
@@ -84,7 +85,10 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     ...response,
-    metadata: { ...response.metadata, liveData: live !== null }
+    metadata: {
+      ...response.metadata,
+      liveData: (live !== null ? "ok" : userCoords ? "unavailable" : "not-requested") as LiveDataStatus
+    }
   });
 }
 

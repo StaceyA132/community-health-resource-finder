@@ -7,7 +7,12 @@ export type SearchableResource = Omit<Resource, "coordinates"> & {
 };
 export type ResourceResult = SearchableResource & { distance: number | null };
 export type DataSource = "mock" | "supabase";
-export type SearchResponse = ReturnType<typeof applyFilters>;
+// Whether nearby OpenStreetMap places were included: "unavailable" means the lookup failed.
+export type LiveDataStatus = "ok" | "unavailable" | "not-requested";
+type FilteredResponse = ReturnType<typeof applyFilters>;
+export type SearchResponse = FilteredResponse & {
+  metadata: FilteredResponse["metadata"] & { liveData: LiveDataStatus };
+};
 
 export const RADIUS_MILES = 60;
 

@@ -4,7 +4,17 @@ import type { ResourceCategory } from "../data/resources";
 // Zippopotam.us. Neither needs an API key. Responses are cached for an hour so repeat
 // searches near the same spot don't hit the public servers again.
 
-const overpassUrl = process.env.OVERPASS_URL || "https://overpass-api.de/api/interpreter";
+// OVERPASS_URL may list several servers, separated by commas; they're tried in order.
+const overpassUrls = (process.env.OVERPASS_URL || "https://overpass-api.de/api/interpreter")
+  .split(",")
+  .map((url) => url.trim())
+  .filter(Boolean);
+const retryDelayMs = 1500;
+// Large queries can take 10-20 s on the busy public server (the query itself allows 20 s),
+// so each attempt gets up to 25 s, within an overall budget for the whole lookup.
+const attemptTimeoutMs = 25000;
+const totalBudgetMs = 30000;
+const minAttemptMs = 5000;
 const userAgent = "community-health-resource-finder (https://github.com/StaceyA132/community-health-resource-finder)";
 const cacheSeconds = 60 * 60;
 const searchRadiusMeters = 25000; // about 15 miles
@@ -154,14 +164,48 @@ export async function fetchLiveResources(
   // Round to about 1 km so nearby searches share a cache entry.
   const rounded = { lat: Math.round(center.lat * 100) / 100, lng: Math.round(center.lng * 100) / 100 };
   const query = buildOverpassQuery(rounded, [...categories].sort());
-  const response = await fetch(`${overpassUrl}?data=${encodeURIComponent(query)}`, {
-    headers: { "User-Agent": userAgent, Accept: "application/json" },
-    signal: AbortSignal.timeout(15000),
-    next: { revalidate: cacheSeconds }
-  });
-  if (!response.ok) throw new Error(`Overpass request failed: ${response.status}`);
-  const data = (await response.json()) as { elements?: OverpassElement[] };
-  return parseOverpassElements(data.elements ?? []);
+
+  // Identical searches made at the same time (re-renders, several open tabs) share one
+  // request, which helps stay under the public server's rate limit.
+  const pending = inFlight.get(query);
+  if (pending) return pending;
+  const request = queryOverpass(query).finally(() => inFlight.delete(query));
+  inFlight.set(query, request);
+  return request;
+}
+
+const inFlight = new Map<string, Promise<LiveResource[]>>();
+
+// Public Overpass servers often answer 429 (busy) or 504 (timed out) and recover within a
+// second or two, so try each configured server, then the first one again after a pause.
+async function queryOverpass(query: string): Promise<LiveResource[]> {
+  const attempts = [...overpassUrls, overpassUrls[0]];
+  const deadline = Date.now() + totalBudgetMs;
+  let lastError: unknown;
+
+  for (let index = 0; index < attempts.length; index++) {
+    const url = attempts[index];
+    if (index > 0) await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+    const remaining = deadline - Date.now();
+    if (remaining < minAttemptMs) break;
+    try {
+      const response = await fetch(`${url}?data=${encodeURIComponent(query)}`, {
+        headers: { "User-Agent": userAgent, Accept: "application/json" },
+        signal: AbortSignal.timeout(Math.min(attemptTimeoutMs, remaining)),
+        next: { revalidate: cacheSeconds }
+      });
+      if (response.ok) {
+        const data = (await response.json()) as { elements?: OverpassElement[] };
+        return parseOverpassElements(data.elements ?? []);
+      }
+      lastError = new Error(`Overpass request failed: ${response.status}`);
+      // Other 4xx errors mean a bad query; retrying won't help.
+      if (response.status < 500 && response.status !== 429) break;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
 }
 
 export async function lookupZip(

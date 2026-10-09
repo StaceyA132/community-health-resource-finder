@@ -48,6 +48,7 @@ export default function Home() {
   const coordsRef = useRef<Coordinates | null>(null);
   const watchIdRef = useRef<number | null>(null);
   const requestIdRef = useRef(0);
+  const chatMessagesRef = useRef<HTMLDivElement>(null);
   zipRef.current = zip;
   categoriesRef.current = selectedCategories;
   coordsRef.current = geoCoords;
@@ -139,6 +140,14 @@ export default function Home() {
     return stopTracking;
   }, [loadResources, startTracking, stopTracking]);
 
+  useEffect(() => {
+    // Scroll so the top of the newest message shows; long replies like the crisis
+    // message would otherwise start out of view.
+    const container = chatMessagesRef.current;
+    const newest = container?.lastElementChild as HTMLElement | null | undefined;
+    if (container && newest) container.scrollTop = newest.offsetTop - 16;
+  }, [chatMessages, chatLoading, chatOpen]);
+
   const toggleCategory = (category: ResourceCategory) => {
     const next = selectedCategories.includes(category)
       ? selectedCategories.filter((c) => c !== category)
@@ -200,7 +209,8 @@ export default function Home() {
         setGeoStatus(null);
       }
       setSelectedCategories(nextCategories);
-      await loadResources(nextZip, nextCategories, coords);
+      // The search shows its own progress and errors, so the chat doesn't wait for it.
+      loadResources(nextZip, nextCategories, coords);
     } catch (err) {
       console.error(err);
       setChatMessages((current) => [...current, { role: "assistant", text: "I’m having trouble connecting right now. Try using the resource filters above." }]);
@@ -244,6 +254,11 @@ export default function Home() {
           </button>
         </form>
         {zipError && <p id="zip-error" className="field-error">{zipError}</p>}
+        {loading && (
+          <p className="loading-note" role="status">
+            Searching nearby listings. This can take up to 30 seconds.
+          </p>
+        )}
         <div className="geo-row">
           <button type="button" className="ghost-button" onClick={() => {
               if (!tracking) return startTracking();
@@ -296,6 +311,22 @@ export default function Home() {
               area or sorted by distance. Try “Use my live location” instead.
             </p>
           )}
+          {metadata?.liveData === "unavailable" && (
+            <p className="notice notice-action">
+              <span>
+                Nearby listings from OpenStreetMap are temporarily unavailable, so some places
+                may be missing.
+              </span>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => loadResources(zip, selectedCategories, geoCoords)}
+                disabled={loading}
+              >
+                Try again
+              </button>
+            </p>
+          )}
           <div className="meta-row" style={{ marginBottom: "0.75rem" }}>
             <strong>{results.length} resources</strong>
             <span>
@@ -304,7 +335,11 @@ export default function Home() {
           </div>
 
           {results.length === 0 && (
-            <p className="notice">No resources matched. Try removing a category filter.</p>
+            <p className="notice">
+              {selectedCategories.length
+                ? "No resources matched. Try removing a category filter."
+                : "No resources found near here yet."}
+            </p>
           )}
           <div className="resource-grid">
             {results.map((resource) => (
@@ -333,7 +368,7 @@ export default function Home() {
             <div><strong>Resource helper</strong><span>Not medical advice</span></div>
             <button type="button" className="chat-close" onClick={() => setChatOpen(false)} aria-label="Close chat">×</button>
           </div>
-          <div className="chat-messages" aria-live="polite">
+          <div className="chat-messages" aria-live="polite" ref={chatMessagesRef}>
             {chatMessages.map((chat, index) => (
               <p key={index} className={`chat-message ${chat.role}${chat.emergency ? " emergency" : ""}`}>
                 {chat.text}

@@ -16,7 +16,8 @@ Searches anywhere in the US also include nearby places from [OpenStreetMap](http
 
 - OpenStreetMap listings are community-edited, so they show a "From OpenStreetMap" tag and ask people to call ahead. Your curated listings (sample data or Supabase) are always included alongside them.
 - If either service is down, the app still shows your curated listings.
-- To use a different Overpass server (for example, one you host for heavier traffic), set `OVERPASS_URL` in `.env.local`.
+- To use a different Overpass server (for example, one you host for heavier traffic), set `OVERPASS_URL` in `.env.local`. You can list several, separated by commas; they're tried in order.
+- The public server is often busy. Busy (429) and timeout (5xx) responses are retried once within a 30-second budget, identical searches made at the same time share one request, and if it still fails the page says OpenStreetMap listings are unavailable and offers **Try again**.
 - The public Overpass server is shared and rate-limited. It suits a demo or a small app, but a busy production site should host its own server or use a paid provider.
 
 ### Connect to Supabase (optional, replaces mock data)
